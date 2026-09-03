@@ -18,20 +18,31 @@ import android.util.Log
 class AlarmService : Service() {
     private var ringtone: Ringtone? = null
     private val handler = Handler(Looper.getMainLooper())
+    private var isWatchdogPaused = false
     private val watchdogRunnable = object : Runnable {
         override fun run() {
-            Log.d("AlarmService", "Watchdog: Bringing activity to front")
-            val ringingIntent = Intent(this@AlarmService, MainActivity::class.java).apply {
-                this.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
-                putExtra("ALARM_RINGING", true)
+            if (!isWatchdogPaused) {
+                Log.d("AlarmService", "Watchdog: Bringing activity to front")
+                val ringingIntent = Intent(this@AlarmService, MainActivity::class.java).apply {
+                    this.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                    putExtra("ALARM_RINGING", true)
+                }
+                startActivity(ringingIntent)
             }
-            startActivity(ringingIntent)
             handler.postDelayed(this, 1000) // Every 1 second for higher enforcement
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d("AlarmService", "AlarmService started")
+        Log.d("AlarmService", "AlarmService started with intent: ${intent?.action}")
+
+        if (intent?.action == "PAUSE_WATCHDOG") {
+            isWatchdogPaused = true
+            return START_STICKY
+        } else if (intent?.action == "RESUME_WATCHDOG") {
+            isWatchdogPaused = false
+            return START_STICKY
+        }
 
         val channelId = "alarm_channel"
         val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
@@ -61,7 +72,7 @@ class AlarmService : Service() {
         val notification = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setContentTitle("Alarm Ringing")
-            .setContentText("Scan your NFC tag to stop!")
+            .setContentText("Scan your NFC tag or QR code to stop!")
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setFullScreenIntent(pendingIntent, true)

@@ -14,6 +14,7 @@ import android.provider.Settings
 import android.util.Log
 import android.view.WindowManager
 import android.widget.Toast
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -62,6 +63,7 @@ class MainActivity : ComponentActivity() {
         if (savedTag != null) {
             viewModel.linkedTagId = hexStringToByteArray(savedTag)
         }
+        viewModel.linkedQrCode = prefs.getString("linked_qr", null)
         viewModel.alarmHour = prefs.getInt("alarm_hour", 8)
         viewModel.alarmMinute = prefs.getInt("alarm_minute", 0)
         viewModel.isAlarmEnabled = prefs.getBoolean("alarm_enabled", false)
@@ -94,18 +96,20 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     if (viewModel.isRinging) {
-                        AlarmRingingScreen()
+                        AlarmRingingScreen(onScanQrClick = { startQrScanner() })
                     } else {
                         AlarmSetupScreen(
                             hour = viewModel.alarmHour,
                             minute = viewModel.alarmMinute,
                             isEnabled = viewModel.isAlarmEnabled,
-                            isLinked = viewModel.linkedTagId != null,
+                            isTagLinked = viewModel.linkedTagId != null,
+                            isQrLinked = viewModel.linkedQrCode != null,
                             isScanning = viewModel.isScanningForLink,
                             onTimeClick = { showTimePicker() },
                             onToggleAlarm = { toggleAlarm(it) },
                             onScanTagClick = { viewModel.isScanningForLink = true },
-                            onUnlinkTagClick = { unlinkTag() },
+                            onScanQrClick = { startQrScanner() },
+                            onUnlinkClick = { unlinkAll() },
                             onOverlayPermissionClick = { requestOverlayPermission() },
                             isOverlayPermissionGranted = viewModel.canDrawOverlays
                         )
@@ -185,14 +189,71 @@ class MainActivity : ComponentActivity() {
         prefs.edit().putString("linked_tag", byteArrayToHexString(tagId)).apply()
     }
 
-    private fun unlinkTag() {
+    private fun unlinkAll() {
         viewModel.linkedTagId = null
+        viewModel.linkedQrCode = null
         viewModel.isAlarmEnabled = false
         cancelAlarm()
-        val prefs = getSharedPreferences("alarm_prefs", Context.MODE_PRIVATE)
-        prefs.edit().remove("linked_tag").apply()
+        val prefs = getSharedPreferences("alarm_prefs", MODE_PRIVATE)
+        prefs.edit().remove("linked_tag").remove("linked_qr").apply()
         saveAlarmState()
-        Log.d("Alarm", "Tag unlinked")
+        Log.d("Alarm", "All links removed")
+    }
+
+    private fun startQrScanner() {
+        // Pause the watchdog so the scanner activity isn't covered by MainActivity
+        val pauseIntent = Intent(this, AlarmService::class.java).apply {
+            action = "PAUSE_WATCHDOG"
+        }
+        startService(pauseIntent)
+
+        val scanner = GmsBarcodeScanning.getClient(this)
+        scanner.startScan()
+            .addOnSuccessListener { barcode ->
+                val rawValue = barcode.rawValue
+                if (rawValue != null) {
+                    handleQrResult(rawValue)
+                }
+                // Watchdog will be resumed if alarm wasn't stopped, or service stopped if it was
+                resumeWatchdogIfRinging()
+            }
+            .addOnFailureListener { e ->
+                Log.e("QR", "Scanning failed", e)
+                Toast.makeText(this, "QR Scan failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                resumeWatchdogIfRinging()
+            }
+            .addOnCanceledListener {
+                resumeWatchdogIfRinging()
+            }
+    }
+
+    private fun resumeWatchdogIfRinging() {
+        if (viewModel.isRinging) {
+            val resumeIntent = Intent(this, AlarmService::class.java).apply {
+                action = "RESUME_WATCHDOG"
+            }
+            startService(resumeIntent)
+        }
+    }
+
+    private fun handleQrResult(rawValue: String) {
+        if (viewModel.isRinging) {
+            if (viewModel.linkedQrCode != null && viewModel.linkedQrCode == rawValue) {
+                stopAlarm()
+            } else {
+                Toast.makeText(this, "Wrong QR code!", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            // Linking mode
+            viewModel.linkedQrCode = rawValue
+            val prefs = getSharedPreferences("alarm_prefs", MODE_PRIVATE)
+            prefs.edit().putString("linked_qr", rawValue).apply()
+            
+            // If they were waiting for an NFC tag, cancel that mode
+            viewModel.isScanningForLink = false
+            
+            Toast.makeText(this, "QR code linked!", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun saveAlarmState() {
@@ -313,15 +374,18 @@ fun AlarmSetupScreen(
     hour: Int,
     minute: Int,
     isEnabled: Boolean,
-    isLinked: Boolean,
+    isTagLinked: Boolean,
+    isQrLinked: Boolean,
     isScanning: Boolean,
     onTimeClick: () -> Unit,
     onToggleAlarm: (Boolean) -> Unit,
     onScanTagClick: () -> Unit,
-    onUnlinkTagClick: () -> Unit,
+    onScanQrClick: () -> Unit,
+    onUnlinkClick: () -> Unit,
     onOverlayPermissionClick: () -> Unit,
     isOverlayPermissionGranted: Boolean
 ) {
+    val isLinked = isTagLinked || isQrLinked
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -353,114 +417,131 @@ fun AlarmSetupScreen(
         
         Spacer(modifier = Modifier.weight(1f))
         
-        Surface(
-            onClick = onTimeClick,
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            modifier = Modifier.padding(16.dp)
-        ) {
-            val formattedTime = remember(hour, minute) {
-                val cal = Calendar.getInstance().apply {
-                    set(Calendar.HOUR_OF_DAY, hour)
-                    set(Calendar.MINUTE, minute)
-                }
-                SimpleDateFormat("hh:mm a", Locale.getDefault()).format(cal.time)
-            }
-            Text(
-                text = formattedTime,
-                fontSize = 64.sp,
-                fontWeight = FontWeight.Thin,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-                maxLines = 1,
-                softWrap = false
-            )
-        }
-        
-        Spacer(modifier = Modifier.height(48.dp))
-        
-        Card(
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = if (isLinked) MaterialTheme.colorScheme.secondaryContainer 
-                                 else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f)
-            )
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(32.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+            Surface(
+                onClick = onTimeClick,
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.padding(16.dp)
             ) {
+                val formattedTime = remember(hour, minute) {
+                    val cal = Calendar.getInstance().apply {
+                        set(Calendar.HOUR_OF_DAY, hour)
+                        set(Calendar.MINUTE, minute)
+                    }
+                    SimpleDateFormat("hh:mm a", Locale.getDefault()).format(cal.time)
+                }
                 Text(
-                    text = if (isScanning) "READY TO SCAN..." 
-                           else if (isLinked) "NFC TAG LINKED" 
-                           else "NFC TAG REQUIRED",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isLinked) MaterialTheme.colorScheme.onSecondaryContainer 
-                            else MaterialTheme.colorScheme.onErrorContainer
+                    text = formattedTime,
+                    fontSize = 64.sp,
+                    fontWeight = FontWeight.Thin,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                    maxLines = 1,
+                    softWrap = false
                 )
-                
-                Text(
-                    text = if (isScanning) "Tap tag against back of phone" 
-                           else if (isLinked) "Use this tag to deactivate alarm" 
-                           else "Link a tag to enable the alarm",
-                    style = MaterialTheme.typography.bodySmall,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
+            }
+            
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isLinked) MaterialTheme.colorScheme.secondaryContainer 
+                                     else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f)
                 )
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(20.dp).fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    if (isLinked) {
-                        OutlinedButton(
-                            onClick = onUnlinkTagClick
-                        ) {
-                            Text("Unlink")
+                    Text(
+                        text = if (isScanning) "READY TO SCAN..." 
+                               else if (isTagLinked) "NFC TAG LINKED" 
+                               else if (isQrLinked) "QR CODE LINKED"
+                               else "NFC OR QR REQUIRED",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isLinked) MaterialTheme.colorScheme.onSecondaryContainer 
+                                else MaterialTheme.colorScheme.onErrorContainer
+                    )
+                    
+                    Text(
+                        text = if (isScanning) "Tap tag or scan QR" 
+                               else if (isTagLinked) "Use this tag to deactivate alarm" 
+                               else if (isQrLinked) "Use this QR to deactivate alarm"
+                               else "Link a tag or QR code to enable",
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
+                    ) {
+                        if (isLinked) {
+                            OutlinedButton(
+                                onClick = onUnlinkClick
+                            ) {
+                                Text("Unlink")
+                            }
+                        }
+                        
+                        if (!isQrLinked) {
+                            Button(
+                                onClick = onScanTagClick,
+                                enabled = !isScanning
+                            ) {
+                                Text(if (isTagLinked) "Change Tag" else "Link Tag")
+                            }
+                        }
+                        
+                        if (!isTagLinked) {
+                            Button(
+                                onClick = onScanQrClick,
+                                enabled = !isScanning
+                            ) {
+                                Text(if (isQrLinked) "Change QR" else "Link QR")
+                            }
                         }
                     }
-                    Button(
-                        onClick = onScanTagClick,
-                        enabled = !isScanning
-                    ) {
-                        Text(if (isLinked) "Change Tag" else "Link Tag")
-                    }
+                }
+            }
+            
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(24.dp)),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            ) {
+                Row(
+                    modifier = Modifier.padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = if (isEnabled) "Alarm is ON" else "Alarm is OFF",
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                    Switch(
+                        checked = isEnabled,
+                        onCheckedChange = onToggleAlarm,
+                        enabled = isLinked
+                    )
                 }
             }
         }
-        
-        Spacer(modifier = Modifier.height(32.dp))
-        
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(24.dp)),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        ) {
-            Row(
-                modifier = Modifier.padding(20.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = if (isEnabled) "Alarm is ON" else "Alarm is OFF",
-                    style = MaterialTheme.typography.titleLarge
-                )
-                Switch(
-                    checked = isEnabled,
-                    onCheckedChange = onToggleAlarm,
-                    enabled = isLinked
-                )
-            }
-        }
-        
-        Spacer(modifier = Modifier.weight(1.2f))
+
+        Spacer(modifier = Modifier.weight(1f))
     }
 }
 
 @Composable
-fun AlarmRingingScreen() {
+fun AlarmRingingScreen(onScanQrClick: () -> Unit) {
     BackHandler(enabled = true) {
         // Do nothing
     }
@@ -506,7 +587,7 @@ fun AlarmRingingScreen() {
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
-                text = "SCAN NFC TAG TO DEACTIVATE",
+                text = "SCAN NFC TAG OR QR CODE TO DEACTIVATE",
                 modifier = Modifier.padding(20.dp),
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
@@ -515,14 +596,45 @@ fun AlarmRingingScreen() {
             )
         }
         
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Button(
+            onClick = onScanQrClick,
+            colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)
+        ) {
+            Text("SCAN QR CODE")
+        }
+
         Spacer(modifier = Modifier.height(48.dp))
         
         Text(
-            text = "Tap your linked tag against the back of your phone to turn off the alarm.",
+            text = "Tap your linked tag or scan your linked QR code to turn off the alarm.",
             style = MaterialTheme.typography.bodyLarge,
             color = Color.White.copy(alpha = 0.9f),
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(horizontal = 16.dp)
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun PreviewAlarmSetupScreen() {
+    AlarmClockTheme {
+        AlarmSetupScreen(
+            hour = 7,
+            minute = 30,
+            isEnabled = true,
+            isTagLinked = true,
+            isQrLinked = false,
+            isScanning = false,
+            onTimeClick = {},
+            onToggleAlarm = { /* ... */ },
+            onScanTagClick = {},
+            onScanQrClick = {},
+            onUnlinkClick = {},
+            onOverlayPermissionClick = {},
+            isOverlayPermissionGranted = true
         )
     }
 }

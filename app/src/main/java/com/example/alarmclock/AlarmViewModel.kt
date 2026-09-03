@@ -11,6 +11,7 @@ class AlarmViewModel : ViewModel() {
     var alarmMinute by mutableIntStateOf(0)
     var isAlarmEnabled by mutableStateOf(false)
     var linkedTagId by mutableStateOf<ByteArray?>(null)
+    var linkedQrCode by mutableStateOf<String?>(null)
     var isRinging by mutableStateOf(false)
     var isScanningForLink by mutableStateOf(false)
     var canDrawOverlays by mutableStateOf(true)
