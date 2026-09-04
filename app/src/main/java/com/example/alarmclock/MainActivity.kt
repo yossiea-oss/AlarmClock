@@ -6,7 +6,6 @@ import android.app.PendingIntent
 import android.app.TimePickerDialog
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.os.Bundle
@@ -41,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import com.example.alarmclock.ui.theme.AlarmClockTheme
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.core.net.toUri
 
 class MainActivity : ComponentActivity() {
     
@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         
         // Load persisted state
-        val prefs = getSharedPreferences("alarm_prefs", Context.MODE_PRIVATE)
+        val prefs = getSharedPreferences("alarm_prefs", MODE_PRIVATE)
         val savedTag = prefs.getString("linked_tag", null)
         if (savedTag != null) {
             viewModel.linkedTagId = hexStringToByteArray(savedTag)
@@ -77,10 +77,8 @@ class MainActivity : ComponentActivity() {
                 WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
         
         dismissKeyguard()
-        
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            requestPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-        }
+
+        requestPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
 
         enableEdgeToEdge()
 
@@ -132,7 +130,7 @@ class MainActivity : ComponentActivity() {
     private fun requestOverlayPermission() {
         val intent = Intent(
             Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-            android.net.Uri.parse("package:$packageName")
+            "package:$packageName".toUri()
         )
         startActivity(intent)
     }
@@ -157,9 +155,7 @@ class MainActivity : ComponentActivity() {
 
     private fun dismissKeyguard() {
         val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            keyguardManager.requestDismissKeyguard(this, null)
-        }
+        keyguardManager.requestDismissKeyguard(this, null)
     }
 
     private fun handleNfcIntent(intent: Intent) {
@@ -392,8 +388,9 @@ fun AlarmSetupScreen(
             .padding(horizontal = 24.dp, vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Spacer(modifier = Modifier.height(48.dp))
         Text(
-            text = "Alarm Clock",
+            text = "TagTime",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onBackground
@@ -426,7 +423,7 @@ fun AlarmSetupScreen(
                 onClick = onTimeClick,
                 shape = RoundedCornerShape(24.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier.padding(16.dp)
+                modifier = Modifier.fillMaxWidth()
             ) {
                 val formattedTime = remember(hour, minute) {
                     val cal = Calendar.getInstance().apply {
@@ -440,7 +437,8 @@ fun AlarmSetupScreen(
                     fontSize = 64.sp,
                     fontWeight = FontWeight.Thin,
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(vertical = 16.dp).fillMaxWidth(),
+                    textAlign = TextAlign.Center,
                     maxLines = 1,
                     softWrap = false
                 )

@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Alarm Clock"
+rootProject.name = "TagTime"
 include(":app")

@@ -1,4 +1,4 @@
-# ⏰ Alarm Clock
+# ⏰ TagTime
 
 This is a modern Android alarm clock application built using **Jetpack Compose** and adhering to the **Material 3** design system. The app allows users to set an alarm time, toggle its status (ON/OFF), and link it to physical identifiers via both NFC tags and QR codes for easy activation/deactivation.
 
