@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.alarmclock"
+    namespace = "com.tagtime.clock"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.example.alarmclock"
+        applicationId = "com.tagtime.clock"
         minSdk = 34
         targetSdk = 37
         versionCode = 1
