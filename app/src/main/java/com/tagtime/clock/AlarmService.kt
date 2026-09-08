@@ -20,6 +20,12 @@ class AlarmService : Service() {
     private var ringtone: Ringtone? = null
     private val handler = Handler(Looper.getMainLooper())
     private var isWatchdogPaused = false
+    
+    private val resumeWatchdogRunnable = Runnable {
+        isWatchdogPaused = false
+        Log.d("AlarmService", "Watchdog: Auto-resumed after timeout")
+    }
+
     private val watchdogRunnable = object : Runnable {
         override fun run() {
             if (!isWatchdogPaused) {
@@ -39,9 +45,12 @@ class AlarmService : Service() {
 
         if (intent?.action == "PAUSE_WATCHDOG") {
             isWatchdogPaused = true
+            handler.removeCallbacks(resumeWatchdogRunnable)
+            handler.postDelayed(resumeWatchdogRunnable, 5000) // 5 seconds timeout
             return START_STICKY
         } else if (intent?.action == "RESUME_WATCHDOG") {
             isWatchdogPaused = false
+            handler.removeCallbacks(resumeWatchdogRunnable)
             return START_STICKY
         }
 

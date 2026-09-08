@@ -96,7 +96,11 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     if (viewModel.isRinging) {
-                        AlarmRingingScreen(onScanQrClick = { startQrScanner() })
+                        AlarmRingingScreen(
+                            isTagLinked = viewModel.linkedTagId != null,
+                            isQrLinked = viewModel.linkedQrCode != null,
+                            onScanQrClick = { startQrScanner() }
+                        )
                     } else {
                         AlarmSetupScreen(
                             hour = viewModel.alarmHour,
@@ -541,7 +545,11 @@ fun AlarmSetupScreen(
 }
 
 @Composable
-fun AlarmRingingScreen(onScanQrClick: () -> Unit) {
+fun AlarmRingingScreen(
+    isTagLinked: Boolean,
+    isQrLinked: Boolean,
+    onScanQrClick: () -> Unit
+) {
     BackHandler(enabled = true) {
         // Do nothing
     }
@@ -587,7 +595,7 @@ fun AlarmRingingScreen(onScanQrClick: () -> Unit) {
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
-                text = "SCAN NFC TAG OR QR CODE TO DEACTIVATE",
+                text = if (isTagLinked) "SCAN NFC TAG TO DEACTIVATE" else "SCAN QR CODE TO DEACTIVATE",
                 modifier = Modifier.padding(20.dp),
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
@@ -596,19 +604,25 @@ fun AlarmRingingScreen(onScanQrClick: () -> Unit) {
             )
         }
         
-        Spacer(modifier = Modifier.height(24.dp))
+        if (isQrLinked) {
+            Spacer(modifier = Modifier.height(24.dp))
 
-        Button(
-            onClick = onScanQrClick,
-            colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)
-        ) {
-            Text("SCAN QR CODE")
+            Button(
+                onClick = onScanQrClick,
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)
+            ) {
+                Text("SCAN QR CODE")
+            }
         }
 
         Spacer(modifier = Modifier.height(48.dp))
         
         Text(
-            text = "Tap your linked tag or scan your linked QR code to turn off the alarm.",
+            text = if (isTagLinked) {
+                "Tap your linked tag against the back of your phone to turn off the alarm."
+            } else {
+                "Tap the button above and scan your linked QR code to turn off the alarm."
+            },
             style = MaterialTheme.typography.bodyLarge,
             color = Color.White.copy(alpha = 0.9f),
             textAlign = TextAlign.Center,
